@@ -1,0 +1,172 @@
+import math
+import sys
+import pygame
+
+pygame.init()
+W, H, FPS = 800, 600, 60
+CX, CY = W // 2, H // 2
+screen = pygame.display.set_mode((W, H))
+pygame.display.set_caption('Activity 4: 3D Projection Engine')
+clock = pygame.time.Clock()
+font = pygame.font.Font(None, 28)
+
+cube_vertices = [
+    [-100, -100, -100], [100, -100, -100], [100, 100, -100], [-100, 100, -100],
+    [-100, -100, 100], [100, -100, 100], [100, 100, 100], [-100, 100, 100],
+]
+cube_edges = [(0, 1), (1, 2), (2, 3), (3, 0), (4, 5), (5, 6), (6, 7), (7, 4),
+              (0, 4), (1, 5), (2, 6), (3, 7)]
+Z_EDGES = [(0, 4), (1, 5), (2, 6), (3, 7)]       # edges parallel 
+
+D = 400                
+PHI_DEG = 30           
+
+MODES = {1: 'Orthographic', 2: 'Cavalier Oblique (L1 = 1.0)',
+         3: 'Cabinet Oblique (L1 = 0.5)', 4: 'One-Point Perspective'}
+
+
+# 3D rotations
+def rotate_x(p, a):
+    x, y, z = p
+    c, s = math.cos(a), math.sin(a)
+    return [x, y * c - z * s, y * s + z * c]
+
+
+def rotate_y(p, a):
+    x, y, z = p
+    c, s = math.cos(a), math.sin(a)
+    return [x * c + z * s, y, -x * s + z * c]
+
+
+def rotate_z(p, a):
+    x, y, z = p
+    c, s = math.cos(a), math.sin(a)
+    return [x * c - y * s, x * s + y * c, z]
+
+
+def rotate(p, ax, ay, az):
+    """Euler rotation applied BEFORE projection: X, then Y, then Z."""
+    return rotate_z(rotate_y(rotate_x(p, ax), ay), az)
+
+
+def project_orthographic(x, y, z):
+    return x, y
+
+
+def project_oblique(x, y, z, mode='cavalier', phi_deg=PHI_DEG):
+    phi = math.radians(phi_deg)
+    L1 = 1.0 if mode == 'cavalier' else 0.5  
+    return x + z * L1 * math.cos(phi), y + z * L1 * math.sin(phi)
+
+
+def project_perspective(x, y, z, d=D):
+    distance = z + d
+    if abs(distance) < 1e-3:
+        distance = 1e-3
+    return (x * d) / distance, (y * d) / distance
+
+
+def project(p, mode):
+    x, y, z = p
+    if mode == 1:
+        return project_orthographic(x, y, z)
+    if mode == 2:
+        return project_oblique(x, y, z, 'cavalier')
+    if mode == 3:
+        return project_oblique(x, y, z, 'cabinet')
+    return project_perspective(x, y, z)
+
+
+def to_screen(pt):
+    return int(CX + pt[0]), int(CY - pt[1])      # flip y
+
+
+def draw_vanishing_guides(rotated, ax, ay, az):
+    """Task 4.4: extend the z-parallel edges; they meet at one vanishing point.
+    VP = projection of the point at infinity along the (rotated) z direction."""
+    dx, dy, dz = rotate((0, 0, 1), ax, ay, az)
+    if dz < 1e-3:
+        return None                         
+    vp = (dx * D / dz, dy * D / dz)
+    if abs(vp[0]) > 4000 or abs(vp[1]) > 4000:
+        return None
+    for a, b in Z_EDGES:
+        far = a if rotated[a][2] > rotated[b][2] else b
+        if rotated[far][2] + D > 1:
+            pygame.draw.line(screen, (120, 80, 60), to_screen(project_perspective(*rotated[far])),
+                             to_screen(vp), 1)
+    pygame.draw.circle(screen, (255, 120, 60), to_screen(vp), 6)
+    return vp
+
+
+def draw_cube(mode, ax, ay, az, show_vp):
+    rotated = [rotate(v, ax, ay, az) for v in cube_vertices]
+    if mode == 4 and any(r[2] + D <= 1 for r in rotated):
+        return
+    pts = [to_screen(project(r, mode)) for r in rotated]
+    vp = draw_vanishing_guides(rotated, ax, ay, az) if (mode == 4 and show_vp) else None
+    for i, (a, b) in enumerate(cube_edges):
+        color = (90, 200, 255) if i < 4 else ((255, 220, 100) if i < 8 else (200, 200, 200))
+        pygame.draw.line(screen, color, pts[a], pts[b], 2)
+    for p in pts:
+        pygame.draw.circle(screen, (255, 255, 255), p, 3)
+    return vp
+
+
+def main():
+    mode, ax, ay, az = 1, 0.0, 0.0, 0.0
+    auto, show_vp = False, True
+    while True:
+        # input
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    pygame.quit()
+                    sys.exit()
+                elif event.key in (pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4):
+                    mode = {pygame.K_1: 1, pygame.K_2: 2, pygame.K_3: 3, pygame.K_4: 4}[event.key]
+                elif event.key == pygame.K_SPACE:
+                    auto = not auto
+                elif event.key == pygame.K_v:
+                    show_vp = not show_vp
+                elif event.key == pygame.K_r:
+                    ax = ay = az = 0.0
+        keys = pygame.key.get_pressed()
+        step = 0.03
+        if keys[pygame.K_UP]:
+            ax -= step
+        if keys[pygame.K_DOWN]:
+            ax += step
+        if keys[pygame.K_LEFT]:
+            ay -= step
+        if keys[pygame.K_RIGHT]:
+            ay += step
+        if keys[pygame.K_q]:
+            az -= step
+        if keys[pygame.K_e]:
+            az += step
+
+        # update
+        if auto:
+            ax += 0.01
+            ay += 0.015
+
+        # render
+        screen.fill((15, 15, 25))
+        draw_cube(mode, ax, ay, az, show_vp)
+        screen.blit(font.render(f'[{mode}] {MODES[mode]}', True, (255, 255, 255)), (10, 10))
+        screen.blit(font.render(
+            f'rot X={math.degrees(ax) % 360:5.1f}  Y={math.degrees(ay) % 360:5.1f}  '
+            f'Z={math.degrees(az) % 360:5.1f}', True, (180, 220, 180)), (10, 38))
+        screen.blit(font.render(
+            '1-4 mode | arrows/Q/E rotate | SPACE auto | R reset | V vanishing pt',
+            True, (150, 150, 160)), (10, H - 28))
+        pygame.display.flip()
+        clock.tick(FPS)
+
+
+if __name__ == '__main__':
+    main()
