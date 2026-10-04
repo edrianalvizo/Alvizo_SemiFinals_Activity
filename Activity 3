@@ -1,0 +1,166 @@
+import math
+import random
+import time
+
+
+class Point3D:
+    def __init__(self, x: float, y: float, z: float):
+        self.x, self.y, self.z = x, y, z
+
+    # ---- vector arithmetic (Task 3.1)
+    def __add__(self, o): return Point3D(self.x + o.x, self.y + o.y, self.z + o.z)
+    def __sub__(self, o): return Point3D(self.x - o.x, self.y - o.y, self.z - o.z)
+    def __mul__(self, k: float): return Point3D(self.x * k, self.y * k, self.z * k)
+    __rmul__ = __mul__
+    def __neg__(self): return Point3D(-self.x, -self.y, -self.z)
+    def __eq__(self, o): return (self.x, self.y, self.z) == (o.x, o.y, o.z)
+    def __repr__(self): return f'({self.x:g}, {self.y:g}, {self.z:g})'
+
+    def dot(self, o) -> float:
+        return self.x * o.x + self.y * o.y + self.z * o.z
+
+    def cross(self, o) -> 'Point3D':
+        return Point3D(self.y * o.z - self.z * o.y,
+                       self.z * o.x - self.x * o.z,
+                       self.x * o.y - self.y * o.x)
+
+    def magnitude_sq(self) -> float:
+        return self.dot(self)
+
+    def magnitude(self) -> float:
+        return math.sqrt(self.magnitude_sq())
+
+    def distance_to(self, other: 'Point3D') -> float:
+        return math.sqrt((self.x - other.x)**2 + (self.y - other.y)**2 + (self.z - other.z)**2)
+
+    def distance_sq_to(self, other: 'Point3D') -> float:
+        return (self - other).magnitude_sq()
+
+    def octant(self) -> int:
+        """Octant 1-8 (right-hand rule). Octant I is (+,+,+); 0 if on a coordinate plane.
+        Order: I(+,+,+) II(-,+,+) III(-,-,+) IV(+,-,+) V..VIII same below the xy-plane."""
+        if self.x == 0 or self.y == 0 or self.z == 0:
+            return 0
+        base = {(1, 1): 1, (-1, 1): 2, (-1, -1): 3, (1, -1): 4}[
+            (1 if self.x > 0 else -1, 1 if self.y > 0 else -1)]
+        return base if self.z > 0 else base + 4
+
+
+class Sphere3D:
+    def __init__(self, center: Point3D, radius: float):
+        self.center = center
+        self.radius = radius
+
+    def contains_point(self, p: Point3D) -> bool:
+        return self.center.distance_sq_to(p) <= self.radius ** 2
+
+    def intersects_sphere(self, other: 'Sphere3D') -> bool:
+        # optimisation: compare squared distance, avoid sqrt
+        return self.center.distance_sq_to(other.center) <= (self.radius + other.radius) ** 2
+
+    @staticmethod
+    def from_general_form(D: float, E: float, F: float, G: float) -> 'Sphere3D':
+        """x^2 + y^2 + z^2 + Dx + Ey + Fz + G = 0 -> complete the squares."""
+        c = Point3D(-D / 2, -E / 2, -F / 2)
+        r_sq = c.magnitude_sq() - G
+        if r_sq < 0:
+            raise ValueError('not a real sphere (r^2 < 0)')
+        return Sphere3D(c, math.sqrt(r_sq))
+
+
+class AABB:
+    def __init__(self, min_pt: Point3D, max_pt: Point3D):
+        self.min_pt = min_pt
+        self.max_pt = max_pt
+
+    def intersects(self, other: 'AABB') -> bool:
+        return (self.min_pt.x <= other.max_pt.x and self.max_pt.x >= other.min_pt.x and
+                self.min_pt.y <= other.max_pt.y and self.max_pt.y >= other.min_pt.y and
+                self.min_pt.z <= other.max_pt.z and self.max_pt.z >= other.min_pt.z)
+
+    def contains_point(self, p: Point3D) -> bool:
+        return (self.min_pt.x <= p.x <= self.max_pt.x and
+                self.min_pt.y <= p.y <= self.max_pt.y and
+                self.min_pt.z <= p.z <= self.max_pt.z)
+
+    def center(self) -> Point3D:
+        return (self.min_pt + self.max_pt) * 0.5
+
+    def bounding_sphere(self) -> Sphere3D:
+        """Smallest sphere enclosing the box (radius = half the diagonal)."""
+        return Sphere3D(self.center(), (self.max_pt - self.min_pt).magnitude() / 2)
+
+
+# --------------------------------------------------------------------- Task 3.2
+def verify_example_3():
+    P, Q = Point3D(2, -1, 7), Point3D(1, -3, 5)
+    d = P.distance_to(Q)
+    print('Example 3: distance P', P, 'to Q', Q, '=', d)
+    assert math.isclose(d, 3.0), 'expected d = 3.0'
+    print('  OK: d = 3.0')
+
+
+def verify_example_5():
+    # x^2 + y^2 + z^2 + 4x - 6y + 2z + 6 = 0
+    # (x+2)^2 + (y-3)^2 + (z+1)^2 = 4 + 9 + 1 - 6 = 8
+    s = Sphere3D.from_general_form(4, -6, 2, 6)
+    print(f'Example 5: center = {s.center}, radius = {s.radius:.3f}')
+    assert s.center == Point3D(-2, 3, -1)
+    assert math.isclose(s.radius, math.sqrt(8))
+    print('  OK: center (-2, 3, -1), radius sqrt(8) = 2.828')
+
+
+def random_object(world=100.0):
+    lo = Point3D(*(random.uniform(0, world) for _ in range(3)))
+    size = Point3D(*(random.uniform(2, 15) for _ in range(3)))
+    box = AABB(lo, lo + size)
+    return box, box.bounding_sphere()
+
+
+def broad_phase_test(n=100, seed=42):
+    random.seed(seed)
+    objects = [random_object() for _ in range(n)]
+    pairs = n * (n - 1) // 2
+
+    # AABBs 
+    t0 = time.perf_counter()
+    aabb_hits = {(i, j) for i in range(n) for j in range(i + 1, n)
+                 if objects[i][0].intersects(objects[j][0])}
+    t_aabb = time.perf_counter() - t0
+
+    # brute force 
+    t0 = time.perf_counter()
+    sphere_hits = {(i, j) for i in range(n) for j in range(i + 1, n)
+                   if objects[i][1].intersects_sphere(objects[j][1])}
+    t_sphere = time.perf_counter() - t0
+
+    # two-stage
+    t0 = time.perf_counter()
+    staged = {(i, j) for (i, j) in sphere_hits if objects[i][0].intersects(objects[j][0])}
+    t_staged = time.perf_counter() - t0
+
+    assert aabb_hits <= sphere_hits
+    assert staged == aabb_hits
+
+    print(f'Broad phase: {n} objects, {pairs} candidate pairs')
+    print(f'  AABB overlaps   : {len(aabb_hits):4d}   ({t_aabb * 1000:.2f} ms)')
+    print(f'  Sphere overlaps : {len(sphere_hits):4d}   ({t_sphere * 1000:.2f} ms)')
+    print(f'  Sphere -> AABB  : {len(staged):4d}   (AABB tests run on only '
+          f'{len(sphere_hits)} of {pairs} pairs, {t_staged * 1000:.2f} ms)')
+    false_positives = len(sphere_hits) - len(aabb_hits)
+    print(f'  Sphere false positives rejected by AABB stage: {false_positives}')
+
+
+def vector_demo():
+    a, b = Point3D(1, 0, 0), Point3D(0, 1, 0)
+    print('Vector demo: a x b =', a.cross(b), ', a . b =', a.dot(b))
+    for p in (Point3D(1, 2, 3), Point3D(-1, 2, 3), Point3D(-1, -2, 3), Point3D(1, -2, 3),
+              Point3D(1, 2, -3), Point3D(-1, 2, -3), Point3D(-1, -2, -3), Point3D(1, -2, -3)):
+        print(f'  {p} -> octant {p.octant()}')
+
+
+if __name__ == '__main__':
+    verify_example_3()
+    verify_example_5()
+    vector_demo()
+    broad_phase_test()
