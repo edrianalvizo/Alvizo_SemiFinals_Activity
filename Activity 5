@@ -1,0 +1,155 @@
+import math
+import sys
+import pygame
+from pygame.locals import DOUBLEBUF, OPENGL, QUIT, KEYDOWN, K_ESCAPE, K_SPACE, K_b
+from OpenGL.GL import *
+from OpenGL.GLU import *
+
+pygame.init()
+display = (800, 600)
+pygame.display.set_mode(display, DOUBLEBUF | OPENGL)
+pygame.display.set_caption('Activity 5: Hardware Pipeline with PyOpenGL')
+clock = pygame.time.Clock()
+
+# pipeline setup 
+glViewport(0, 0, display[0], display[1])
+glMatrixMode(GL_PROJECTION)
+glLoadIdentity()
+gluPerspective(45, display[0] / display[1], 0.1, 50.0)
+glMatrixMode(GL_MODELVIEW)
+glLoadIdentity()
+glEnable(GL_DEPTH_TEST)
+glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)  
+glClearColor(0.07, 0.07, 0.12, 1.0)
+
+vertices = [
+    (1, -1, -1), (1, 1, -1), (-1, 1, -1), (-1, -1, -1),
+    (1, -1, 1), (1, 1, 1), (-1, -1, 1), (-1, 1, 1),
+]
+colors = [
+    (1, 0, 0), (0, 1, 0), (0, 0, 1), (1, 1, 0),
+    (1, 0, 1), (0, 1, 1), (1, 1, 1), (0.5, 0.5, 0.5),
+]
+surfaces = [(0, 1, 2, 3), (3, 2, 7, 6), (6, 7, 5, 4), (4, 5, 1, 0), (1, 5, 7, 2), (4, 0, 3, 6)]
+
+
+# solid cube 
+def draw_colored_cube():
+    glBegin(GL_QUADS)
+    for surface in surfaces:
+        for vertex_idx in surface:
+            glColor3fv(colors[vertex_idx])
+            glVertex3fv(vertices[vertex_idx])
+    glEnd()
+
+
+def draw_flat_box(color):
+    """Single-color box (same cube geometry) used for the arm segments."""
+    glColor3f(*color)
+    glBegin(GL_QUADS)
+    for surface in surfaces:
+        for vertex_idx in surface:
+            glVertex3fv(vertices[vertex_idx])
+    glEnd()
+
+
+def draw_segment(length, thickness, color):
+    """Draw a box whose pivot is at its left end (x = 0) extending along +x."""
+    glPushMatrix()
+    glTranslatef(length / 2, 0, 0)
+    glScalef(length / 2, thickness, thickness)
+    draw_flat_box(color)
+    glPopMatrix()
+
+
+# hierarchical model 
+def draw_arm(shoulder, elbow, wrist):
+    glPushMatrix()                         # whole arm
+    glTranslatef(0.5, 0.8, 0)             
+    glRotatef(shoulder, 0, 0, 1)
+    draw_segment(1.8, 0.2, (0.9, 0.5, 0.2))    
+    glTranslatef(1.8, 0, 0)             
+    glRotatef(elbow, 0, 0, 1)
+    draw_segment(1.4, 0.16, (0.3, 0.7, 0.9))    
+    glTranslatef(1.4, 0, 0)             
+    glRotatef(wrist, 0, 0, 1)
+    draw_segment(0.5, 0.25, (0.8, 0.8, 0.3))    
+    glTranslatef(0.5, 0, 0)              
+    for dy in (-0.15, 0.15):
+        glPushMatrix()                   
+        glTranslatef(0, dy, 0)
+        draw_segment(0.4, 0.06, (0.9, 0.3, 0.3))
+        glPopMatrix()
+    glPopMatrix()
+
+
+def draw_quad(x, y, z, color_rgba):
+    glColor4f(*color_rgba)
+    glBegin(GL_QUADS)
+    glVertex3f(x - 1.0, y - 0.8, z)
+    glVertex3f(x + 1.0, y - 0.8, z)
+    glVertex3f(x + 1.0, y + 0.8, z)
+    glVertex3f(x - 1.0, y + 0.8, z)
+    glEnd()
+
+
+def draw_transparent_quads(blend_on):
+    if blend_on:
+        glEnable(GL_BLEND)
+    glDepthMask(GL_FALSE)
+    draw_quad(-0.6, -2.4, 0.6, (1.0, 0.2, 0.2, 0.5))     
+    draw_quad(0.0, -2.2, 0.0, (0.2, 1.0, 0.2, 0.5))
+    draw_quad(0.6, -2.0, -0.6, (0.2, 0.4, 1.0, 0.5))   
+    glDepthMask(GL_TRUE)
+    glDisable(GL_BLEND)
+
+
+def main():
+    angle = 0.0
+    paused, blend_on = False, True
+    while True:
+        for event in pygame.event.get():
+            if event.type == QUIT:
+                pygame.quit()
+                sys.exit()
+            if event.type == KEYDOWN:
+                if event.key == K_ESCAPE:
+                    pygame.quit()
+                    sys.exit()
+                elif event.key == K_SPACE:
+                    paused = not paused
+                elif event.key == K_b:
+                    blend_on = not blend_on
+
+        if not paused:
+            angle += 1.0
+
+        # clear BOTH buffers each frame
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+        glLoadIdentity()
+        glTranslatef(0.0, 0.0, -10)           
+
+        # left spinning cube 
+        glPushMatrix()
+        glTranslatef(-2.8, 0.8, 0)
+        glRotatef(angle, 1, 1, 0)
+        draw_colored_cube()
+        glPopMatrix()
+
+        # articulated arm 
+        shoulder = 25 * math.sin(math.radians(angle * 1.2))
+        elbow = 45 + 40 * math.sin(math.radians(angle * 1.7))
+        wrist = 30 * math.sin(math.radians(angle * 2.5))
+        draw_arm(shoulder, elbow, wrist)
+
+        # transparent geometry 
+        draw_transparent_quads(blend_on)
+
+        pygame.display.set_caption(
+            f'Activity 5: PyOpenGL  |  blending: {"ON" if blend_on else "OFF"} (B)  |  SPACE pause')
+        pygame.display.flip()
+        clock.tick(60)
+
+
+if __name__ == '__main__':
+    main()
